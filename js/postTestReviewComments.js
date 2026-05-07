@@ -151,14 +151,31 @@ function triggerReworkIfConfigured(ticketKey, config, customParams) {
     }
 }
 
+function resolveCustomParams(params, config) {
+    var merged = {};
+    var patch = configLoader.resolveInstructions(
+        'pr_test_automation_review',
+        null,
+        config
+    ).jobParamPatch;
+    if (patch && patch.customParams) {
+        Object.assign(merged, patch.customParams);
+    }
+    Object.assign(
+        merged,
+        (params.jobParams && params.jobParams.customParams) ||
+            params.customParams ||
+            {}
+    );
+    return merged;
+}
+
 function action(params) {
     try {
         const ticketKey = params.ticket.key;
         const jiraComment = params.response || '';
-        const customParams = (params.jobParams && params.jobParams.customParams) ||
-            params.customParams ||
-            {};
         const config = configLoader.loadProjectConfig(params.jobParams || params);
+        const customParams = resolveCustomParams(params, config);
 
         console.log('=== Processing test automation review for', ticketKey, '===');
 
