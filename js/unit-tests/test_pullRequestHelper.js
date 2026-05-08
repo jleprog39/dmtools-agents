@@ -115,7 +115,7 @@ suite('pullRequest helper', function() {
             workingDir: 'repo',
             runCommand: function(command, workingDir) {
                 commands.push({ command: command, workingDirectory: workingDir || null });
-                if (command.indexOf('git merge-base --is-ancestor') === 0) return 'behind';
+                if (command.indexOf('git merge-base --is-ancestor') === 0) throw new Error('not ancestor');
                 if (command === 'git status --porcelain') return '';
                 return '';
             }
@@ -125,9 +125,9 @@ suite('pullRequest helper', function() {
         assert.equal(result.updated, true);
         assert.deepEqual(commands, [
             { command: 'git fetch origin main', workingDirectory: 'repo' },
-            { command: 'git merge-base --is-ancestor origin/main HEAD && echo up_to_date || echo behind', workingDirectory: 'repo' },
+            { command: 'git merge-base --is-ancestor origin/main HEAD', workingDirectory: 'repo' },
             { command: 'git status --porcelain', workingDirectory: 'repo' },
-            { command: 'GIT_EDITOR=true git merge --no-edit origin/main', workingDirectory: 'repo' }
+            { command: 'git merge --no-edit origin/main', workingDirectory: 'repo' }
         ]);
     });
 
@@ -149,7 +149,7 @@ suite('pullRequest helper', function() {
         assert.equal(result.updated, false);
         assert.deepEqual(commands, [
             'git fetch origin release',
-            'git merge-base --is-ancestor origin/release HEAD && echo up_to_date || echo behind'
+            'git merge-base --is-ancestor origin/release HEAD'
         ]);
     });
 

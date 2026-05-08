@@ -84,10 +84,14 @@ function syncBranchWithBase(options) {
         console.log('Synchronizing ' + branchName + ' with origin/' + baseBranch + ' before publishing...');
         runCommand('git fetch origin ' + baseBranch, workingDir);
 
-        var ancestry = cleanCommandOutput(
-            runCommand('git merge-base --is-ancestor origin/' + baseBranch + ' HEAD && echo up_to_date || echo behind', workingDir) || ''
-        );
-        if (ancestry.indexOf('up_to_date') !== -1) {
+        var upToDate = false;
+        try {
+            runCommand('git merge-base --is-ancestor origin/' + baseBranch + ' HEAD', workingDir);
+            upToDate = true;
+        } catch (ancestorError) {
+            upToDate = false;
+        }
+        if (upToDate) {
             console.log('✅ Branch already contains origin/' + baseBranch);
             return { success: true, updated: false };
         }
@@ -100,7 +104,7 @@ function syncBranchWithBase(options) {
             };
         }
 
-        runCommand('GIT_EDITOR=true git merge --no-edit origin/' + baseBranch, workingDir);
+        runCommand('git merge --no-edit origin/' + baseBranch, workingDir);
         console.log('✅ Merged origin/' + baseBranch + ' into ' + branchName);
         return { success: true, updated: true };
     } catch (error) {
