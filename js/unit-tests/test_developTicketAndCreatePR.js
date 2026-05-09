@@ -11,6 +11,7 @@ function loadDevelopTicketAndCreatePR(mocks) {
             './common/submodules.js': {},
             './common/feedbackLoop.js': {
                 runQualityGates: function() { return { success: true }; },
+                runPolicyGates: function() { return { success: true }; },
                 resumeAgent: function() { return { attempted: false }; }
             },
             './configLoader.js': configLoaderModule,

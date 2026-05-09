@@ -131,4 +131,41 @@ suite('feedbackLoop helper', function() {
         assert.equal(loaded.files['outputs/feedback/TS-3_quality_gate_flutter-analyze.attempt'], '2');
     });
 
+    test('runs policy gates with separate feedback attempt markers', function() {
+        var gateCalls = 0;
+        var loaded = loadFeedbackLoop({
+            cli_execute_command: function(args) {
+                loaded.commands.push(args.command);
+                if (args.command === 'dart run tool/check_theme_tokens.dart') {
+                    gateCalls++;
+                    if (gateCalls === 1) throw new Error('hardcoded color');
+                }
+                return '';
+            }
+        });
+
+        var result = loaded.mod.runPolicyGates({
+            ticketKey: 'TS-4',
+            customParams: {
+                feedbackLoop: {
+                    policyGates: {
+                        enabled: true,
+                        gates: [
+                            {
+                                name: 'theme-token-lint',
+                                command: 'dart run tool/check_theme_tokens.dart',
+                                maxAttempts: 1
+                            }
+                        ]
+                    }
+                }
+            }
+        });
+
+        assert.equal(result.success, true);
+        assert.equal(gateCalls, 2);
+        assert.equal(loaded.files['outputs/feedback/TS-4_policy_gate_theme-token-lint.attempt'], '1');
+        assert.contains(loaded.files['outputs/feedback/TS-4_policy_gate_theme-token-lint.md'], 'hardcoded color');
+    });
+
 });

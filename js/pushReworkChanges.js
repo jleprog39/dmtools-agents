@@ -349,6 +349,14 @@ function action(params) {
         if (!gateResult.success) {
             throw new Error('Quality gate failed before rework push: ' + gateResult.failedGate + '\n' + gateResult.error);
         }
+        var policyResult = feedbackLoop.runPolicyGates({
+            ticketKey: ticketKey,
+            customParams: _customParams,
+            section: 'policyGates'
+        });
+        if (!policyResult.success) {
+            throw new Error('Policy gate failed before rework push: ' + policyResult.failedGate + '\n' + policyResult.error);
+        }
 
         // Commit and push
         let branchName;

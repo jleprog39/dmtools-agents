@@ -313,6 +313,14 @@ function action(params) {
         if (!gateResult.success) {
             throw new Error('Quality gate failed before test rework publish: ' + gateResult.failedGate + '\n' + gateResult.error);
         }
+        var policyResult = feedbackLoop.runPolicyGates({
+            ticketKey: ticketKey,
+            customParams: customParams,
+            section: 'policyGates'
+        });
+        if (!policyResult.success) {
+            throw new Error('Policy gate failed before test rework publish: ' + policyResult.failedGate + '\n' + policyResult.error);
+        }
 
         let branchName;
         try {

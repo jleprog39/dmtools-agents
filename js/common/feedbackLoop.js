@@ -131,16 +131,19 @@ function resumeAgent(options) {
     return { attempted: true, attempts: attempt, promptPath: promptPath };
 }
 
-function getQualityGates(customParams, section) {
-    var config = normalizeConfig(customParams || {}, section || 'qualityGates');
-    var gates = config.gates || config.qualityGates || ((customParams && customParams.qualityGates) || []);
+function getConfiguredGates(customParams, section, legacyKey) {
+    var config = normalizeConfig(customParams || {}, section);
+    var gates = config.gates || config[section] || ((customParams && customParams[legacyKey || section]) || []);
     return Array.isArray(gates) ? gates : [];
 }
 
-function runQualityGates(options) {
+function runConfiguredGates(options, section, stagePrefix) {
     options = options || {};
+    section = section || 'qualityGates';
+    stagePrefix = stagePrefix || 'quality_gate';
+    var gateType = section === 'policyGates' ? 'policy gate' : 'quality gate';
     var customParams = options.customParams || {};
-    var gates = getQualityGates(customParams, options.section || 'qualityGates');
+    var gates = getConfiguredGates(customParams, options.section || section, section);
     var results = [];
 
     for (var i = 0; i < gates.length; i++) {
@@ -158,7 +161,7 @@ function runQualityGates(options) {
         while (true) {
             attempts += 1;
             try {
-                console.log('Running quality gate "' + name + '": ' + command);
+                console.log('Running ' + gateType + ' "' + name + '": ' + command);
                 var output = runCommand(command) || '';
                 results.push({ name: name, success: true, attempts: attempts, output: output });
                 break;
@@ -173,20 +176,18 @@ function runQualityGates(options) {
                     };
                 }
 
+                var feedbackLoopConfig = { feedbackLoop: {} };
+                feedbackLoopConfig.feedbackLoop[section] = {
+                    enabled: true,
+                    maxAttempts: maxAttempts,
+                    resumeArgs: gate.resumeArgs || undefined,
+                    nonRecoverablePatterns: gate.nonRecoverablePatterns || undefined
+                };
                 var resume = resumeAgent({
                     ticketKey: options.ticketKey,
-                    customParams: {
-                        feedbackLoop: {
-                            qualityGates: {
-                                enabled: true,
-                                maxAttempts: maxAttempts,
-                                resumeArgs: gate.resumeArgs || undefined,
-                                nonRecoverablePatterns: gate.nonRecoverablePatterns || undefined
-                            }
-                        }
-                    },
-                    section: 'qualityGates',
-                    stage: 'quality_gate_' + name,
+                    customParams: feedbackLoopConfig,
+                    section: section,
+                    stage: stagePrefix + '_' + name,
                     error: 'Command failed: ' + command + '\n\n' + errorText
                 });
                 if (!resume.attempted) {
@@ -204,10 +205,19 @@ function runQualityGates(options) {
     return { success: true, results: results };
 }
 
+function runQualityGates(options) {
+    return runConfiguredGates(options || {}, 'qualityGates', 'quality_gate');
+}
+
+function runPolicyGates(options) {
+    return runConfiguredGates(options || {}, 'policyGates', 'policy_gate');
+}
+
 module.exports = {
     DEFAULT_MAX_ATTEMPTS: DEFAULT_MAX_ATTEMPTS,
     resumeAgent: resumeAgent,
     runQualityGates: runQualityGates,
+    runPolicyGates: runPolicyGates,
     normalizeConfig: normalizeConfig,
     isFeedbackEnabled: isFeedbackEnabled,
     sanitizeId: sanitizeId

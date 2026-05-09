@@ -736,6 +736,16 @@ function action(params) {
             resetDevelopmentForRetry(ticketKey, statuses, _customParams, actualParams.metadata, 'Quality Gate', error);
             return { success: true, path: 'development-reset-for-retry', error: error };
         }
+        var policyResult = feedbackLoop.runPolicyGates({
+            ticketKey: ticketKey,
+            customParams: _customParams,
+            section: 'policyGates'
+        });
+        if (!policyResult.success) {
+            const error = 'Policy gate failed before development publish: ' + policyResult.failedGate + '\n' + policyResult.error;
+            resetDevelopmentForRetry(ticketKey, statuses, _customParams, actualParams.metadata, 'Policy Gate', error);
+            return { success: true, path: 'development-reset-for-retry', error: error };
+        }
 
         // Perform git operations
         const prTarget = configLoader.resolvePRTargetBranch(config, params.ticket || actualParams.ticket);
