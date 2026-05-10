@@ -40,7 +40,10 @@
           "description": "Backlog / To Do Stories → ask clarification questions",
           "jql": "project = {jiraProject} AND issuetype in ('Story') AND status in ('Backlog', 'To Do')",
           "configFile": "agents/story_questions.json",
-          "skipIfLabel": "sm_story_questions_triggered",
+          "skipIfLabels": [
+            "sm_story_questions_triggered",
+            "ai_questions_asked"
+          ],
           "addLabel": "sm_story_questions_triggered"
         },
         {
