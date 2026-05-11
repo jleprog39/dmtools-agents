@@ -15,6 +15,7 @@
  *   JQL placeholders {jiraProject} and {parentTicket} are resolved from config.
  *   jobParams.maxTriggeredWorkflows (or maxWorkflowsPerRun) limits total workflow dispatches
  *   per SM run across all non-local rules.
+ *   Override priority: env SM_MAX_WORKFLOWS > config.smMaxWorkflows > sm.json value.
  *
  * Rule fields:
  *   jql            (required) — JQL to find tickets (supports {jiraProject}, {parentTicket})
@@ -550,16 +551,32 @@ function processRule(rule, globalRepoInfo, ruleIndex, workflowBudget) {
 
 // ─── Main ─────────────────────────────────────────────────────────────────────
 
+function resolveWorkflowCap(jsonCap, projectCfg) {
+    // Priority: env SM_MAX_WORKFLOWS > config.smMaxWorkflows > sm.json value
+    var envVal = typeof process !== 'undefined' && process.env && process.env.SM_MAX_WORKFLOWS;
+    if (envVal) {
+        var n = normalizePositiveInt(envVal);
+        if (n) { console.log('  Workflow cap override (env SM_MAX_WORKFLOWS): ' + n); return n; }
+    }
+    if (projectCfg && typeof projectCfg.smMaxWorkflows !== 'undefined') {
+        var n2 = normalizePositiveInt(projectCfg.smMaxWorkflows);
+        if (n2) { console.log('  Workflow cap override (config.smMaxWorkflows): ' + n2); return n2; }
+    }
+    return normalizePositiveInt(jsonCap);
+}
+
 function action(params) {
     var p     = params.jobParams || params;
     var rules = p.rules;
-    var configuredWorkflowCap = normalizePositiveInt(
-        typeof p.maxTriggeredWorkflows !== 'undefined' ? p.maxTriggeredWorkflows : p.maxWorkflowsPerRun
-    );
-    var workflowBudget = configuredWorkflowCap ? { initial: configuredWorkflowCap, remaining: configuredWorkflowCap } : null;
 
     // Load global project configuration (used as default when rules have no configPath)
     projectConfig = configLoader.loadProjectConfig(p);
+
+    var configuredWorkflowCap = resolveWorkflowCap(
+        typeof p.maxTriggeredWorkflows !== 'undefined' ? p.maxTriggeredWorkflows : p.maxWorkflowsPerRun,
+        projectConfig
+    );
+    var workflowBudget = configuredWorkflowCap ? { initial: configuredWorkflowCap, remaining: configuredWorkflowCap } : null;
 
     // Use smRules from config if provided (full override)
     if (projectConfig.smRules && Array.isArray(projectConfig.smRules) && projectConfig.smRules.length > 0) {
