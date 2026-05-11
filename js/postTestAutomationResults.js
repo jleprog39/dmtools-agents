@@ -223,10 +223,35 @@ function action(params) {
         // Step 1: Read structured result
         const result = readResultJson(workingDir);
         if (!result) {
-            jira_post_comment({
-                key: ticketKey,
-                comment: 'h3. ⚠️ Test Automation Error\n\nCould not read test result. Ticket moved back to *Backlog* so SM can retry.'
-            });
+            // CLI failed (e.g. rate limit) but may have written partial code — push it
+            var partialPushed = false;
+            try {
+                var rawBranchMissing = runInRepo('git branch --show-current', workingDir) || '';
+                var branchMissing = cleanCommandOutput(rawBranchMissing);
+                if (branchMissing) {
+                    runInRepo('git config user.name "' + config.git.authorName + '"', workingDir);
+                    runInRepo('git config user.email "' + config.git.authorEmail + '"', workingDir);
+                    var partialCommitMsg = configLoader.formatTemplate(
+                        config.formats.commitMessage.testAutomation,
+                        {ticketKey: ticketKey, ticketSummary: ticketSummary}
+                    ) + ' (partial — CLI interrupted)';
+                    var gitResult = performGitOperations(branchMissing, partialCommitMsg, workingDir, testFilesPath);
+                    if (gitResult.success && !gitResult.noNewCommit) {
+                        partialPushed = true;
+                        console.log('✅ Pushed partial work on branch', branchMissing);
+                    }
+                }
+            } catch (e) {
+                console.warn('Could not push partial work:', e);
+            }
+
+            var commentMsg = 'h3. ⚠️ Test Automation Error\n\nCLI exited without producing result JSON (likely hit rate limit or crashed).\n';
+            if (partialPushed) {
+                commentMsg += 'Partial code was pushed to the branch — next retry will continue from there.\n';
+            }
+            commentMsg += 'Ticket moved back to *Backlog* so SM can retry.';
+
+            jira_post_comment({ key: ticketKey, comment: commentMsg });
             try {
                 jira_move_to_status({ key: ticketKey, statusName: STATUSES.BACKLOG });
                 console.log('✅ Missing result — moved', ticketKey, 'to', STATUSES.BACKLOG);
@@ -250,7 +275,7 @@ function action(params) {
             } catch (e) {
                 console.warn('Failed to remove WIP label after missing result:', e);
             }
-            return { success: false, error: 'No test result JSON found' };
+            return { success: false, error: 'No test result JSON found', partialPushed: partialPushed };
         }
 
         const status = (result.status || '').toLowerCase();
