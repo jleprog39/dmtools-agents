@@ -6,15 +6,16 @@
  * labels and updates the feature PR, and posts results to Jira.
  *
  * Steps:
- * 1. Read outputs/test_automation_result.json
- * 2. Commit + push test files in the automation repo (src/tests/)
- * 3. Create or find PR in the test automation repository
- * 4. Find the feature PR in the main app repository (by trigger ticket key)
- * 5. Add configurable pass/fail labels to the feature PR (via dmtools github_add_pr_label)
- * 6. Append test summary to the feature PR description (via gh pr edit)
- * 7. Post Jira comment on the trigger ticket
- * 8. Move trigger ticket status (Passed / Failed / Blocked)
- * 9. Remove WIP and SM trigger labels
+ * 1. If mandatory output files are missing, attempt one resume run via run-agent.sh --continue --resume
+ * 2. Read outputs/test_automation_result.json
+ * 3. Commit + push test files in the automation repo (src/tests/)
+ * 4. Create or find PR in the test automation repository
+ * 5. Find the feature PR in the main app repository (by trigger ticket key)
+ * 6. Add configurable pass/fail labels to the feature PR (via dmtools github_add_pr_label)
+ * 7. Append test summary to the feature PR description (via gh pr edit)
+ * 8. Post Jira comment on the trigger ticket
+ * 9. Move trigger ticket status (Passed / Failed / Blocked)
+ * 10. Remove WIP and SM trigger labels
  *
  * Configuration (via customParams):
  *   targetRepository.workingDir   — path to test automation repo (required)
@@ -30,6 +31,84 @@
 var configLoader = require('./configLoader.js');
 const { STATUSES, LABELS } = require('./config.js');
 var prHelper = require('./common/pullRequest.js');
+
+/** Marker file path to prevent infinite resume loops. */
+var RESUME_MARKER = 'outputs/.missing-output-resume-attempted';
+
+/**
+ * If mandatory output files are missing and a resume has not already been attempted,
+ * run `run-agent.sh --continue --resume` with a targeted recovery prompt so the agent
+ * writes outputs/test_automation_result.json, outputs/response.md, outputs/pr_body.md,
+ * and outputs/pr_feature_update.md without rewriting the already-committed flows.
+ *
+ * Returns true if a resume was executed (caller should re-check outputs afterwards).
+ * Returns false if outputs already exist, or a resume was already attempted.
+ */
+function attemptResumeIfOutputsMissing(ticketKey, workingDir) {
+    var resultJson = readOutputFile('outputs/test_automation_result.json', workingDir);
+    if (resultJson) {
+        return false; // outputs present — no resume needed
+    }
+
+    // Guard against infinite loops
+    var alreadyAttempted = readOutputFile(RESUME_MARKER, workingDir);
+    if (alreadyAttempted) {
+        console.warn('⚠️  Resume already attempted once — skipping second resume to avoid infinite loop');
+        return false;
+    }
+
+    console.log('⚠️  Mandatory output files missing. Attempting resume run to write outputs…');
+
+    // Write marker first so the resumed run cannot trigger another resume
+    try {
+        file_write(RESUME_MARKER, new Date().toISOString() + '\n');
+    } catch (e) {
+        console.warn('Could not write resume marker:', e);
+    }
+
+    var recoveryPrompt =
+        'RESUME TASK: The previous automation run created Maestro flows and pushed them to the test branch,\n' +
+        'but it ended before writing the mandatory output files.\n\n' +
+        'DO NOT rewrite, delete, or re-run the flows from scratch.\n' +
+        'Inspect git changes and Maestro run logs, then write the four output files:\n\n' +
+        '1. /Users/vagrant/git/outputs/test_automation_result.json\n' +
+        '   Schema: { "status":"passed"|"failed", "passed":N, "failed":N, "skipped":N, "summary":"…",\n' +
+        '     "results":[{ "ticket":"MAPC-XXXX", "status":"passed"|"failed"|"written"|"skipped",\n' +
+        '       "title":"…", "file":"src/flows/…" }] }\n' +
+        '   Mark any flow that was WRITTEN but not run as "status":"written".\n\n' +
+        '2. /Users/vagrant/git/outputs/response.md\n' +
+        '   Jira-flavoured markdown (h3 header, Jira table with || pipes) summarising per-TC results.\n\n' +
+        '3. /Users/vagrant/git/outputs/pr_body.md\n' +
+        '   GitHub-flavoured markdown version of response.md (| tables, **bold**).\n\n' +
+        '4. /Users/vagrant/git/outputs/pr_feature_update.md\n' +
+        '   Compact summary for the feature PR (same format as pr_body.md but shorter).\n\n' +
+        'After writing all four files, verify they exist:\n' +
+        '```bash\n' +
+        'ls -la /Users/vagrant/git/outputs/\n' +
+        'cat /Users/vagrant/git/outputs/test_automation_result.json\n' +
+        '```\n\n' +
+        'Do NOT log out, do NOT install the app, do NOT re-run the full suite unless it is very fast.\n' +
+        'Ticket: ' + ticketKey + '\n';
+
+    var promptFile = 'outputs/.resume-prompt.md';
+    try {
+        file_write(promptFile, recoveryPrompt);
+    } catch (e) {
+        console.error('Failed to write resume prompt file:', e);
+        return false;
+    }
+
+    try {
+        var resumeResult = cli_execute_command({
+            command: 'bash agents/scripts/run-agent.sh --continue --resume ' + promptFile
+        });
+        console.log('Resume run output:', (resumeResult || '').substring(0, 500));
+        return true;
+    } catch (e) {
+        console.error('Resume run failed:', e);
+        return false;
+    }
+}
 
 function parseMcpResult(result) {
     if (!result) return null;
@@ -320,6 +399,14 @@ function action(params) {
             console.log('Automation repo branch:', JSON.stringify(branchName));
         }
 
+        // Step 2b: If mandatory outputs are missing, attempt one resume run before committing.
+        // This handles the case where the agent ran out of context or was interrupted
+        // before writing outputs/test_automation_result.json and friends.
+        var resumed = attemptResumeIfOutputsMissing(ticketKey, workingDir);
+        if (resumed) {
+            console.log('Resume run completed — re-checking outputs before proceeding.');
+        }
+
         // Step 3: Commit + push + create automation PR (ALWAYS — don't lose agent's work)
         var automationPrUrl = null;
         if (branchName && workingDir) {
@@ -340,7 +427,8 @@ function action(params) {
         if (!result) {
             console.warn('No test_automation_result.json found — posting error to Jira but keeping git work');
             try {
-                var errMsg = 'h3. ⚠️ Test Automation Error\n\nFlows may have been written but output JSON is missing. Check workflow logs.';
+                var errMsg = 'h3. ⚠️ Test Automation Error\n\nFlows may have been written but output JSON is missing. Check workflow logs.' +
+                    (resumed ? '\n\n_Resume was attempted but also did not produce output files._' : '');
                 if (automationPrUrl) errMsg += '\n\n*Automation PR*: ' + automationPrUrl;
                 jira_post_comment({ key: ticketKey, comment: errMsg });
             } catch (e) { console.warn('Failed to post error Jira comment:', e); }
