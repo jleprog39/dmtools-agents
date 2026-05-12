@@ -364,6 +364,34 @@ suite('postMobileTestAutomationResults — git commit resilience', function() {
         assert.ok(jiraComments[0].comment.indexOf('⚠️') !== -1, 'error comment should warn about missing output');
     });
 
+    test('missing-output resume prompt runs suite when simulator is available', function() {
+        var writes = {};
+        var WORKING_DIR = 'dependencies/PostNL-commercial-mobileApp-automation';
+
+        var m = loadPostCli({
+            file_read: function(opts) {
+                if (opts.path.indexOf('.dmtools/config') !== -1) return null;
+                return null; // no result JSON and no resume marker
+            },
+            file_write: function(path, content) {
+                writes[path] = content;
+            },
+            cli_execute_command: function(opts) {
+                if ((opts.command || '').indexOf('branch --show-current') !== -1) return 'test/MAPC-6618';
+                return '';
+            },
+            jira_post_comment: function() {}
+        });
+
+        m.action(makeParams('MAPC-6618', { targetRepository: { workingDir: WORKING_DIR } }));
+
+        var prompt = writes['outputs/.resume-prompt.md'] || '';
+        assert.ok(prompt.indexOf('run the generated suite once on the available simulator') !== -1,
+            'resume prompt should instruct suite execution when app_info has simulator details');
+        assert.ok(prompt.indexOf('Only mark flows as "written" when there is a real blocker') !== -1,
+            'resume prompt should not allow written status without a real execution blocker');
+    });
+
     test('reads result JSON from automation repo outputs dir as fallback', function() {
         var statusMoves = [];
         var WORKING_DIR = 'dependencies/PostNL-commercial-mobileApp-automation';

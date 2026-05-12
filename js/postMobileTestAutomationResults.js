@@ -67,15 +67,18 @@ function attemptResumeIfOutputsMissing(ticketKey, workingDir) {
     }
 
     var recoveryPrompt =
-        'RESUME TASK: The previous automation run created Maestro flows and pushed them to the test branch,\n' +
-        'but it ended before writing the mandatory output files.\n\n' +
-        'DO NOT rewrite, delete, or re-run the flows from scratch.\n' +
-        'Inspect git changes and Maestro run logs, then write the four output files:\n\n' +
+        'RESUME TASK: The previous automation run ended before writing the mandatory output files.\n\n' +
+        'DO NOT rewrite or delete existing flows. Inspect git changes, app_info.md, and any Maestro run logs first.\n' +
+        'If the generated suite has NOT been executed and app_info.md provides APP_PATH/MAESTRO_DEVICE,\n' +
+        'run the generated suite once on the available simulator before writing results. Use the suite file\n' +
+        'under src/flows/suites/ when present. Only mark flows as "written" when there is a real blocker\n' +
+        'that prevents simulator execution, and explain that blocker in the summary.\n\n' +
+        'Then write the four output files:\n\n' +
         '1. /Users/vagrant/git/outputs/test_automation_result.json\n' +
         '   Schema: { "status":"passed"|"failed", "passed":N, "failed":N, "skipped":N, "summary":"…",\n' +
         '     "results":[{ "ticket":"MAPC-XXXX", "status":"passed"|"failed"|"written"|"skipped",\n' +
         '       "title":"…", "file":"src/flows/…" }] }\n' +
-        '   Mark any flow that was WRITTEN but not run as "status":"written".\n\n' +
+        '   Mark any flow that was WRITTEN but not run as "status":"written" only when simulator execution was impossible.\n\n' +
         '2. /Users/vagrant/git/outputs/response.md\n' +
         '   Jira-flavoured markdown (h3 header, Jira table with || pipes) summarising per-TC results.\n\n' +
         '3. /Users/vagrant/git/outputs/pr_body.md\n' +
@@ -87,7 +90,7 @@ function attemptResumeIfOutputsMissing(ticketKey, workingDir) {
         'ls -la /Users/vagrant/git/outputs/\n' +
         'cat /Users/vagrant/git/outputs/test_automation_result.json\n' +
         '```\n\n' +
-        'Do NOT log out, do NOT install the app, do NOT re-run the full suite unless it is very fast.\n' +
+        'Do NOT log out or install the app unless app_info.md explicitly requires it.\n' +
         'Ticket: ' + ticketKey + '\n';
 
     var promptFile = 'outputs/.resume-prompt.md';
