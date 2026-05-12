@@ -8,6 +8,7 @@
       "aiRole": "Senior Code Reviewer & Security Expert",
       "instructions": [
         "./agents/instructions/review/pr_review_instructions.md",
+        "./agents/instructions/development/ts_flutter_rules.md",
         "./agents/instructions/review/pr_review_json_output.md"
       ],
       "knownInfo": "",
