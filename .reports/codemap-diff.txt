@@ -1,0 +1,48 @@
+Codemap scan — 2026-05-19
+==========================
+
+Status: INITIAL (no prior codemaps detected; full generation)
+Files scanned: 53 JS in js/, 31 top-level JSON configs, 19 prompts, ~50 instruction MDs
+Output: docs/CODEMAPS/{architecture,backend,frontend,data,dependencies}.md
+Token estimate (sum): ~2,900 tokens across 5 files
+
+Project shape
+-------------
+- Type: library / git submodule (mounted as `agents/`)
+- No package.json, no Node runtime — GraalJS via DMTools
+- Three pipelines defined in sm.json rules: Story, Bug, Test Case
+- 3 agent types: Teammate, TestCasesGenerator, JSRunner
+
+External services detected
+--------------------------
+Jira, GitHub, Azure DevOps (optional SCM provider), Bitrise, Confluence,
+Figma, Gemini (DMTools-mediated), CLI AI providers (cursor / copilot / codemie).
+
+Notable architecture points
+---------------------------
+- Distributed locking via Jira labels (`sm_*_triggered`, `pr_approved`, `wip`)
+- Two execution modes: dispatch (ai-teammate.yml workflow_dispatch) and localExecution
+- configLoader merge semantics: full-replace vs deep-merge (see backend.md)
+- Single CLI dispatch point: scripts/run-agent.sh
+- Canonical AI output: outputs/response.md
+
+Architecture changes since last scan
+------------------------------------
+N/A (first scan)
+
+New dependencies detected
+-------------------------
+N/A (first scan)
+
+Staleness warnings
+------------------
+None — all codemaps freshly generated.
+
+Recommended re-scan triggers
+----------------------------
+- New rule added to sm.json or sm_merge.json
+- New *.json agent config at repo root
+- New file in js/ (especially preCli*/post*)
+- Changes to js/configLoader.js merge keys
+- Changes to scripts/run-agent.sh provider matrix
+- New entries in setup/install.sh
