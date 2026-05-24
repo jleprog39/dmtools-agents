@@ -4,7 +4,7 @@
  */
 
 // Import common helper functions
-const { extractTicketKey } = require('./common/jiraHelpers.js');
+const { extractTicketKey, moveStatusOrAlert } = require('./common/jiraHelpers.js');
 const prHelper = require('./common/pullRequest.js');
 const submoduleHelper = require('./common/submodules.js');
 const feedbackLoop = require('./common/feedbackLoop.js');
@@ -638,10 +638,7 @@ function action(params) {
                                 'Moved ticket to *In Review* for review.'
                         });
                     } catch (e) {}
-                    try {
-                        jira_move_to_status({ key: ticketKey, statusName: statuses.IN_REVIEW });
-                        console.log('✅ Moved', ticketKey, 'to In Review');
-                    } catch (e) { console.warn('Failed to move to In Review:', e); }
+                    moveStatusOrAlert(ticketKey, statuses.IN_REVIEW, 'PR already open');
                     return { success: true, path: 'pr_already_open', ticketKey };
                 }
             }
@@ -790,12 +787,7 @@ function action(params) {
                     } catch (e) {
                         console.warn('Failed to post agent analysis comment:', e);
                     }
-                    try {
-                        jira_move_to_status({ key: ticketKey, statusName: statuses.IN_REVIEW });
-                        console.log('✅ Moved', ticketKey, 'to', statuses.IN_REVIEW, '(no code changes needed)');
-                    } catch (e) {
-                        console.warn('Failed to move ticket to ' + statuses.IN_REVIEW + ':', e);
-                    }
+                    moveStatusOrAlert(ticketKey, statuses.IN_REVIEW, 'no code changes needed');
                     if (wipLabelIfNoChanges) {
                         try { jira_remove_label({ key: ticketKey, label: wipLabelIfNoChanges }); } catch (e) {}
                     }
@@ -907,16 +899,10 @@ function action(params) {
             console.warn('Failed to assign ticket to initiator:', error);
         }
 
-        // Move ticket to In Review status
-        try {
-            jira_move_to_status({
-                key: ticketKey,
-                statusName: statuses.IN_REVIEW
-            });
-            console.log('✅ Moved ' + ticketKey + ' to In Review');
-        } catch (error) {
-            console.warn('Failed to move ticket to In Review:', error);
-        }
+        // Move ticket to In Review status — on failure, post a loud Jira comment
+        // so the ticket isn't silently stranded in its current status (which would
+        // cause SM rules to miss it and the PR to hang unmerged).
+        moveStatusOrAlert(ticketKey, statuses.IN_REVIEW, 'after PR creation');
 
         // Post comment with PR details
         postPRCommentToJira(ticketKey, prResult.prUrl, branchName);

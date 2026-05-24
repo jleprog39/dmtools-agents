@@ -13,6 +13,7 @@ var submoduleHelper = require('./common/submodules.js');
 var prHelper = require('./common/pullRequest.js');
 var feedbackLoop = require('./common/feedbackLoop.js');
 var autoStart = require('./common/autoStart.js');
+var jh = require('./common/jiraHelpers.js');
 const { GIT_CONFIG, STATUSES, LABELS, resolveStatuses } = require('./config.js');
 
 /**
@@ -432,13 +433,9 @@ function action(params) {
             console.warn('Could not find PR to post comment — skipping GitHub PR comment');
         }
 
-        // Move ticket to In Review
-        try {
-            jira_move_to_status({ key: ticketKey, statusName: statuses.IN_REVIEW });
-            console.log('✅ Moved', ticketKey, 'to', statuses.IN_REVIEW);
-        } catch (statusError) {
-            console.warn('Failed to move ticket to In Review:', statusError);
-        }
+        // Move ticket to In Review — post Jira comment on failure so the ticket
+        // isn't silently stranded (would block SM's pr_review rule from picking up)
+        jh.moveStatusOrAlert(ticketKey, statuses.IN_REVIEW, 'after rework push');
 
         // Assign back to initiator (if provided)
         try {

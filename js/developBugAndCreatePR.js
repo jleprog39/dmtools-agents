@@ -20,6 +20,7 @@
  */
 
 var configLoader = require('./configLoader.js');
+var jh = require('./common/jiraHelpers.js');
 const { STATUSES, LABELS, resolveStatuses } = require('./config.js');
 const developTicket = require('./developTicketAndCreatePR.js');
 
@@ -84,10 +85,7 @@ function action(params) {
                                 'Moved ticket to *In Review* for review.'
                         });
                     } catch (e) {}
-                    try {
-                        jira_move_to_status({ key: ticketKey, statusName: statuses.IN_REVIEW });
-                        console.log('✅ Moved', ticketKey, 'to In Review');
-                    } catch (e) { console.warn('Failed to move to In Review:', e); }
+                    jh.moveStatusOrAlert(ticketKey, statuses.IN_REVIEW, 'PR already open');
                     removeLabels(ticketKey, params);
                     return { success: true, path: 'pr_already_open', ticketKey };
                 }

@@ -115,10 +115,71 @@ function setTicketPriority(ticketKey, priority) {
     }
 }
 
+/**
+ * Release SM idempotency labels so the next SM tick can retry the rule.
+ * Called from setup-scripts (preCli*) on TRANSIENT errors (git, network) where
+ * a retry is desired. Do NOT call for permanent failures (no PR, branch missing,
+ * etc.) — those would cause SM to loop and spam Jira comments.
+ *
+ * @param {string} ticketKey - Jira ticket key
+ * @param {Object} customParams - agent customParams (reads removeLabel/removeLabels)
+ */
+function releaseSmLock(ticketKey, customParams) {
+    if (!ticketKey || !customParams) return;
+    var labels = [];
+    if (customParams.removeLabel) labels.push(customParams.removeLabel);
+    if (Array.isArray(customParams.removeLabels)) {
+        customParams.removeLabels.forEach(function(l) { if (l) labels.push(l); });
+    }
+    labels.forEach(function(label) {
+        try {
+            jira_remove_label({ key: ticketKey, label: label });
+            console.log('  Released SM lock label: ' + label);
+        } catch (e) {
+            console.warn('  Failed to release SM lock label ' + label + ': ' + (e && e.message || e));
+        }
+    });
+}
+
+/**
+ * Move ticket to a target status, posting a loud Jira comment on failure
+ * (instead of silent console.warn). Used after PR creation / rework push where
+ * a missed transition would silently strand the ticket and confuse SM rules.
+ *
+ * @param {string} ticketKey - Jira ticket key
+ * @param {string} statusName - Target status name
+ * @param {string} [contextLabel] - Optional human label for comment ("after PR creation")
+ * @returns {boolean} true on success, false on failure (comment already posted)
+ */
+function moveStatusOrAlert(ticketKey, statusName, contextLabel) {
+    try {
+        jira_move_to_status({ key: ticketKey, statusName: statusName });
+        console.log('✅ Moved ' + ticketKey + ' to ' + statusName);
+        return true;
+    } catch (error) {
+        var msg = (error && error.message) || String(error);
+        console.error('❌ Failed to move ' + ticketKey + ' to ' + statusName + ': ' + msg);
+        try {
+            jira_post_comment({
+                key: ticketKey,
+                comment: 'h3. ⚠️ Status Transition Failed\n\n' +
+                    'Could not move ticket to *' + statusName + '*' +
+                    (contextLabel ? ' (' + contextLabel + ')' : '') + '.\n\n' +
+                    'Jira workflow may not allow this transition from the current status. ' +
+                    'Please move the ticket manually so the SM pipeline can pick it up.\n\n' +
+                    '{code}' + msg + '{code}'
+            });
+        } catch (e) {}
+        return false;
+    }
+}
+
 // Export functions for use by other modules
 module.exports = {
     assignForReview,
     extractTicketKey,
-    setTicketPriority
+    setTicketPriority,
+    releaseSmLock,
+    moveStatusOrAlert
 };
 

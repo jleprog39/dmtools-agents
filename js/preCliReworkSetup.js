@@ -9,6 +9,7 @@
 
 var configLoader = require('./configLoader.js');
 const gh = require('./common/githubHelpers.js');
+const jh = require('./common/jiraHelpers.js');
 const fetchQuestionsToInput = require('./fetchQuestionsToInput.js');
 const fetchParentContextToInput = require('./fetchParentContextToInput.js');
 
@@ -78,6 +79,13 @@ function action(params) {
         try {
             gh.checkoutPRBranch(branchName, config.workingDir);
         } catch (e) {
+            // Transient git failure (dirty tree, stale ref, network) — release the
+            // SM idempotency label so the next SM tick can retry. Permanent failures
+            // above (no PR / no branch / no remote) intentionally do NOT release the
+            // lock; SM would otherwise loop and spam Jira with the same comment.
+            var customParams = (params.jobParams && params.jobParams.customParams) ||
+                params.customParams || {};
+            jh.releaseSmLock(ticketKey, customParams);
             failSetup(ticketKey, inputFolder, 'Failed to checkout branch: ' + e.toString());
         }
 

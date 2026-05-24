@@ -104,31 +104,32 @@ function checkoutPRBranch(branchName, workingDir) {
     var cmdOpts = workingDir ? { workingDirectory: workingDir } : {};
 
     var cmd = function(command) { return cli_execute_command(Object.assign({}, cmdOpts, { command: command })); };
+    var tryCmd = function(command) { try { return cmd(command); } catch (e) { return null; } };
 
     cmd('git config user.name "' + GIT_CONFIG.AUTHOR_NAME + '"');
     cmd('git config user.email "' + GIT_CONFIG.AUTHOR_EMAIL + '"');
+
     // Update remote refs; blobless repos already have the commit graph
     cmd(prHelper.buildOriginFetchCommand('--prune'));
 
-    const localBranch = cleanCommandOutput(cmd('git branch --list "' + branchName + '"') || '');
-
-    if (localBranch.trim()) {
-        cmd('git checkout ' + branchName);
-        cmd('git pull origin ' + branchName);
-    } else {
-        const remoteBranch = cleanCommandOutput(cmd('git ls-remote --heads origin ' + branchName) || '');
-        if (remoteBranch.trim()) {
-            try {
-                cmd(prHelper.buildOriginFetchCommand(branchName + ':' + branchName));
-                cmd('git checkout ' + branchName);
-            } catch (e) {
-                cmd(prHelper.buildOriginFetchCommand(branchName));
-                cmd('git checkout -b ' + branchName + ' origin/' + branchName);
-            }
-        } else {
-            throw new Error('Branch not found locally or remotely: ' + branchName);
-        }
+    // Verify branch exists on origin before continuing
+    const remoteBranch = cleanCommandOutput(cmd('git ls-remote --heads origin ' + branchName) || '');
+    if (!remoteBranch.trim()) {
+        throw new Error('Branch not found on origin: ' + branchName);
     }
+
+    // Pull fresh tip for this branch
+    cmd(prHelper.buildOriginFetchCommand(branchName));
+
+    // Ensure a clean workspace so checkout cannot fail on dirty tree / stale state.
+    // Best-effort: missing HEAD on a fresh shallow clone is fine.
+    tryCmd('git reset --hard HEAD');
+    tryCmd('git clean -fd');
+
+    // Idempotent: -B creates the local branch if missing, otherwise resets it to
+    // track origin/<branch>. Avoids the prior failure mode where a partial state
+    // left a local ref behind and the fallback `-b` then collided with it.
+    cmd('git checkout -B ' + branchName + ' origin/' + branchName);
 
     console.log('✅ Checked out branch:', branchName);
 }
