@@ -18,7 +18,7 @@ In addition to outputs/response.md (Jira-formatted review), you MUST generate:
       "line": 42,
       "startLine": 40,
       "side": "RIGHT",
-      "body": "💡 **Suggestion**: comment text written directly here in GitHub Markdown",
+      "comment": "outputs/pr_review_comments/comment-1.md",
       "severity": "BLOCKING|IMPORTANT|SUGGESTION"
     }
   ],
@@ -42,12 +42,12 @@ The value MUST be exactly one of: `APPROVE`, `REQUEST_CHANGES`, `BLOCK` (upperca
 - **prUrl**: Leave null (will be filled by JS action)
 - **generalComment**: Path to markdown file with overall PR review comment (GitHub markdown)
 - **resolvedThreadIds**: Array of GraphQL thread node IDs (from `pr_discussions_raw.json` → `threads[i].threadId`) that were **fully fixed** in this rework and should be marked as resolved on GitHub. Leave empty `[]` on first review or when no prior threads were fixed. Only include threads whose fix you verified in the diff — do NOT resolve threads that are still open or only partially addressed.
-- **inlineComments**: Array of inline code review comments — write the text **directly** in the `body` field (do NOT create separate markdown files)
+- **inlineComments**: Array of inline code review comments. Each comment's text goes in its **own markdown file** under `outputs/pr_review_comments/`, referenced by the `comment` path. **Never write comment text inline in the JSON.** Comment text contains code snippets and regexes whose backslashes (e.g. `\s`, `\.`) are invalid JSON escape sequences — they silently break `JSON.parse` and the entire review is lost. The JSON must hold only scalars, ids, and file paths.
   - **path**: Relative path to file from repo root (e.g. `src/components/Button.tsx`)
   - **line**: Line number to comment on (must be within the diff hunk for that file)
   - **startLine**: (Optional) Start line for multi-line comment range
   - **side**: `"RIGHT"` for new code (default), `"LEFT"` for old code
-  - **body**: Comment text in GitHub Markdown — write it inline here, not as a file path
+  - **comment**: Path to a markdown file holding the comment text in GitHub Markdown (e.g. `outputs/pr_review_comments/comment-1.md`) — **a path, never inline text**
   - **severity**: `BLOCKING`, `IMPORTANT`, or `SUGGESTION`
 - **issueCounts**: Counts of each issue severity — **REQUIRED**, count 0 if none
 
@@ -130,13 +130,10 @@ db.query(query, [userId]);
    - Use relative paths from outputs/ directory
    - Comment files numbered sequentially: comment-1.md, comment-2.md, etc.
 
-## ✅ JSON Validation (Mandatory Final Step)
+## ✅ Keep the JSON parse-safe (Mandatory)
 
-**CRITICAL**: After writing `outputs/pr_review.json`, you MUST validate it before stopping:
+`outputs/pr_review.json` is read by an automated script with `JSON.parse`. If it does not parse, the **entire review is silently lost** — no comments are posted and the ticket gets stuck. The single biggest cause is free-form text (code, regexes) placed inside JSON string values, because backslashes like `\s` or `\.` are invalid JSON escapes.
 
-1. Re-read the full contents of `outputs/pr_review.json`
-2. Verify it is syntactically valid JSON — check for: unclosed brackets/braces, trailing commas, stray characters, truncated content
-3. If the file is malformed or invalid in any way, **rewrite the entire file** with corrected, valid JSON
-4. Do NOT stop until `outputs/pr_review.json` contains valid, parseable JSON
+**Rule of thumb:** the JSON holds only enums, numbers, ids, and **file paths**. All prose, code snippets, and regexes live in `.md` files (`generalComment`, `outputs/pr_review_comments/comment-N.md`). Never paste code or comment text into a JSON string.
 
-> **Why this matters**: Invalid JSON causes the review to be silently dropped — the post-processing script fails with a `SyntaxError` and the PR receives no comments at all. The review is lost entirely. This validation step is non-negotiable.
+After writing the file, re-read it once and confirm it is valid JSON (no unclosed brackets, trailing commas, or stray escape sequences). If invalid, rewrite it.

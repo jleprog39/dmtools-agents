@@ -120,8 +120,14 @@ function resolveApprovedThreads(repoInfo, prNumber, resolvedThreadIds) {
 }
 
 function postInlineComment(repoInfo, prNumber, inlineComment) {
+    // Comment text lives in a .md file referenced by `comment` (canonical, keeps code/markdown
+    // out of pr_review.json so it cannot break JSON parsing). `body` is a deprecated inline
+    // fallback kept only to avoid silently dropping a stray comment.
     const filePath = inlineComment.path || inlineComment.file;
-    const commentText = inlineComment.body || readFile(inlineComment.comment);
+    const commentText = readFile(inlineComment.comment) || inlineComment.body;
+    if (!inlineComment.comment && inlineComment.body) {
+        console.warn('⚠️ inline comment used deprecated inline `body` (should be a .md file ref): ' + filePath);
+    }
 
     try {
         if (!commentText) {

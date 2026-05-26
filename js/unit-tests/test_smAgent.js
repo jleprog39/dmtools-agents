@@ -33,6 +33,8 @@ function makeSmAgent(opts) {
 
     var capturedTriggers = [];
     var capturedLabels = [];
+    var capturedRemovedLabels = [];
+    var capturedComments = [];
     var capturedStatusMoves = [];
     var capturedJqls = [];
 
@@ -66,7 +68,13 @@ function makeSmAgent(opts) {
             capturedLabels.push(labelOpts);
             if (opts.onAddLabel) opts.onAddLabel(labelOpts);
         },
-        jira_remove_label: function() {},
+        jira_remove_label: function(labelOpts) {
+            capturedRemovedLabels.push(labelOpts);
+            if (opts.onRemoveLabel) opts.onRemoveLabel(labelOpts);
+        },
+        jira_post_comment: function(commentOpts) {
+            capturedComments.push(commentOpts);
+        },
         jira_move_to_status: function(moveOpts) {
             capturedStatusMoves.push(moveOpts);
             if (opts.onMoveStatus) opts.onMoveStatus(moveOpts);
@@ -122,6 +130,8 @@ function makeSmAgent(opts) {
         action: sm.action,
         capturedTriggers: capturedTriggers,
         capturedLabels: capturedLabels,
+        capturedRemovedLabels: capturedRemovedLabels,
+        capturedComments: capturedComments,
         capturedStatusMoves: capturedStatusMoves,
         capturedJqls: capturedJqls
     };
@@ -615,6 +625,80 @@ suite('smAgent: skipIfLabel', function() {
         assert.equal(sm.capturedLabels.length, 2);
         assert.equal(sm.capturedLabels[0].label, 'primary_label');
         assert.equal(sm.capturedLabels[1].label, 'secondary_label');
+    });
+
+});
+
+// ── stale-lock watchdog ─────────────────────────────────────────────────────────
+
+suite('smAgent: stale-lock watchdog', function() {
+
+    var STALE_UPDATED = '2020-01-01T00:00:00.000+0000';            // far past → orphaned lock
+    var FRESH_UPDATED = new Date(Date.now() - 60000).toISOString(); // 1 min ago → agent still active
+
+    test('releases an orphaned sm_ lock and re-queues (no trigger this cycle)', function() {
+        var sm = makeSmAgent({
+            fileMap: {},
+            tickets: [
+                { key: 'T-stuck', fields: { labels: ['sm_story_review_triggered'], updated: STALE_UPDATED } }
+            ]
+        });
+
+        sm.action(baseParams('o', 'r', [
+            makeRule("project = X", { skipIfLabel: 'sm_story_review_triggered' })
+        ]));
+
+        assert.equal(sm.capturedRemovedLabels.length, 1, 'stale lock removed');
+        assert.equal(sm.capturedRemovedLabels[0].key, 'T-stuck');
+        assert.equal(sm.capturedRemovedLabels[0].label, 'sm_story_review_triggered');
+        assert.equal(sm.capturedComments.length, 1, 'posts a visible release notice');
+        assert.equal(sm.capturedTriggers.length, 0, 'not re-dispatched in the same cycle (re-picked next run)');
+    });
+
+    test('respects a fresh sm_ lock (agent still working — not released)', function() {
+        var sm = makeSmAgent({
+            fileMap: {},
+            tickets: [
+                { key: 'T-active', fields: { labels: ['sm_story_review_triggered'], updated: FRESH_UPDATED } }
+            ]
+        });
+
+        sm.action(baseParams('o', 'r', [
+            makeRule("project = X", { skipIfLabel: 'sm_story_review_triggered' })
+        ]));
+
+        assert.equal(sm.capturedRemovedLabels.length, 0, 'fresh lock must not be released');
+        assert.equal(sm.capturedTriggers.length, 0, 'still skipped — lock respected');
+    });
+
+    test('never auto-releases non-SM skip labels even when stale (e.g. wip)', function() {
+        var sm = makeSmAgent({
+            fileMap: {},
+            tickets: [
+                { key: 'T-paused', fields: { labels: ['wip'], updated: STALE_UPDATED } }
+            ]
+        });
+
+        sm.action(baseParams('o', 'r', [
+            makeRule("project = X", { skipIfLabel: 'wip' })
+        ]));
+
+        assert.equal(sm.capturedRemovedLabels.length, 0, 'manual wip pause must never be auto-released');
+    });
+
+    test('isLockStale: true for old updated, false for fresh/missing', function() {
+        var raw = loadModule(
+            'agents/js/smAgent.js',
+            makeRequire({ './configLoader.js': configLoaderModule, './common/scm.js': { createScm: function() { return {}; } } }),
+            {}
+        );
+        assert.ok(raw.isLockStale({ fields: { updated: STALE_UPDATED } }, 45), 'old → stale');
+        assert.notOk(raw.isLockStale({ fields: { updated: FRESH_UPDATED } }, 45), 'fresh → not stale');
+        assert.notOk(raw.isLockStale({ fields: {} }, 45), 'missing updated → not stale (do not auto-release)');
+        assert.ok(raw.isSmLockLabel('sm_story_review_triggered'), 'sm_ prefix is an SM lock');
+        assert.ok(raw.isSmLockLabel('pr_review_triggered'), '_triggered suffix is an SM lock');
+        assert.notOk(raw.isSmLockLabel('wip'), 'wip is not an SM lock');
+        assert.notOk(raw.isSmLockLabel('ai_questions_asked'), 'semantic label is not an SM lock');
     });
 
 });

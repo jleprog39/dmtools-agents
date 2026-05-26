@@ -22,7 +22,7 @@ Create these files:
       "line": 42,
       "startLine": 40,
       "side": "RIGHT",
-      "body": "Comment text",
+      "comment": "outputs/pr_review_comments/comment-1.md",
       "severity": "BLOCKING|IMPORTANT|SUGGESTION"
     }
   ],
@@ -36,4 +36,5 @@ Create these files:
 
 Use `recommendation`, not `verdict`.
 Counts must match reported issues.
+Comment text goes in a `.md` file referenced by `comment` (a path), never inline in the JSON — code/regex backslashes break `JSON.parse` and the review is lost. The JSON holds only scalars, ids, and file paths.
 

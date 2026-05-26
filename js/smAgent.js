@@ -306,6 +306,70 @@ function normalizePositiveInt(value) {
     return normalized > 0 ? normalized : null;
 }
 
+// ─── Stale-lock watchdog ────────────────────────────────────────────────────────
+//
+// An SM idempotency lock (e.g. sm_story_review_triggered) is a Jira label SM stamps before
+// dispatching an agent; the agent's postJS is supposed to remove it on completion. If that
+// agent run dies before releasing it, the ticket stays locked and SM skips it every cycle —
+// a permanent deadlock. The watchdog detects such orphaned locks (held far longer than any
+// legitimate run) and releases them so the ticket is re-queued. It is cause-agnostic: it
+// recovers from any failure mode, not just the one that triggered this fix.
+
+// Minutes a ticket may hold an SM lock before it is considered orphaned. Comfortably longer
+// than the slowest legitimate agent run. Overridable via config.smLockTtlMinutes.
+var DEFAULT_LOCK_TTL_MINUTES = 45;
+
+function resolveLockTtlMinutes(config) {
+    var n = normalizePositiveInt(config && config.smLockTtlMinutes);
+    return n || DEFAULT_LOCK_TTL_MINUTES;
+}
+
+// Only auto-release SM-managed locks (sm_* / *_triggered). Never touch meaningful/manual
+// skip labels like 'wip' (manual pause) or 'ai_questions_asked' (semantic state).
+function isSmLockLabel(label) {
+    if (!label) return false;
+    return label.indexOf('sm_') === 0 || /_triggered$/.test(label);
+}
+
+// Parse a Jira timestamp to epoch ms, tolerating the +0000 (no-colon) timezone form.
+function parseJiraDateMs(value) {
+    if (!value) return NaN;
+    var ms = Date.parse(value);
+    if (!isNaN(ms)) return ms;
+    return Date.parse(String(value).replace(/([+-]\d{2})(\d{2})$/, '$1:$2'));
+}
+
+// True if the ticket has not been updated within ttlMinutes — a held lock is then likely
+// orphaned, since a healthy agent run always updates the ticket within a couple of minutes.
+function isLockStale(ticket, ttlMinutes) {
+    var updated = ticket && ticket.fields && ticket.fields.updated;
+    var updatedMs = parseJiraDateMs(updated);
+    if (isNaN(updatedMs)) return false; // unknown freshness — do not auto-release
+    return (Date.now() - updatedMs) / 60000 > ttlMinutes;
+}
+
+// Release an orphaned SM lock and leave a visible note. Returns true if removed.
+function releaseStaleLock(ticketKey, skipLabel, ttlMinutes) {
+    try {
+        jira_remove_label({ key: ticketKey, label: skipLabel });
+        console.log('  ♻️  ' + ticketKey + ' — released stale SM lock "' + skipLabel +
+            '" (no update in > ' + ttlMinutes + ' min; prior agent run likely failed) — re-queuing');
+        try {
+            jira_post_comment({
+                key: ticketKey,
+                comment: 'h3. ♻️ SM released a stale lock\n\n' +
+                    'The lock {{' + skipLabel + '}} was held for over ' + ttlMinutes +
+                    ' minutes with no ticket update — the previous agent run likely failed before ' +
+                    'completing. SM has released the lock and will re-queue this ticket.'
+            });
+        } catch (e) { /* best-effort notice */ }
+        return true;
+    } catch (e) {
+        console.warn('  ⚠️  Failed to release stale lock "' + skipLabel + '" on ' + ticketKey + ': ' + (e.message || e));
+        return false;
+    }
+}
+
 // ─── Local execution ──────────────────────────────────────────────────────────
 
 function runLocalAction(jsPath, ticket, agentParams) {
@@ -387,7 +451,7 @@ function processRuleLocally(rule, globalRepoInfo, ruleIndex) {
 
     var tickets = [];
     try {
-        tickets = jira_search_by_jql({ jql: interpolatedJql, fields: ['key', 'labels'] }) || [];
+        tickets = jira_search_by_jql({ jql: interpolatedJql, fields: ['key', 'labels', 'updated'] }) || [];
     } catch (e) {
         console.error('  ❌ Jira query failed: ' + (e.message || e));
         return { processedKeys: [], skippedKeys: [] };
@@ -413,6 +477,13 @@ function processRuleLocally(rule, globalRepoInfo, ruleIndex) {
 
         var skipLabel = firstMatchingLabel(ticket, normalizeLabels(rule.skipIfLabel, rule.skipIfLabels));
         if (skipLabel) {
+            // Watchdog: auto-release an orphaned SM lock so a dead run can't deadlock the ticket forever.
+            var ttlMin = resolveLockTtlMinutes(effectiveConfig);
+            if (isSmLockLabel(skipLabel) && isLockStale(ticket, ttlMin)) {
+                releaseStaleLock(key, skipLabel, ttlMin);
+                skippedKeys.push(key); // lock cleared — re-picked next cycle
+                return;
+            }
             console.log('  ⏭️  ' + key + ' skipped (label: ' + skipLabel + ')');
             skippedKeys.push(key);
             return;
@@ -489,7 +560,7 @@ function processRule(rule, globalRepoInfo, ruleIndex, workflowBudget) {
 
     var tickets = [];
     try {
-        tickets = jira_search_by_jql({ jql: interpolatedJql, fields: ['key', 'labels'] }) || [];
+        tickets = jira_search_by_jql({ jql: interpolatedJql, fields: ['key', 'labels', 'updated'] }) || [];
     } catch (e) {
         console.error('  ❌ Jira query failed: ' + (e.message || e));
         return { processedKeys: [], skippedKeys: [] };
@@ -527,6 +598,13 @@ function processRule(rule, globalRepoInfo, ruleIndex, workflowBudget) {
 
         var skipLabel = firstMatchingLabel(ticket, normalizeLabels(rule.skipIfLabel, rule.skipIfLabels));
         if (skipLabel) {
+            // Watchdog: auto-release an orphaned SM lock so a dead run can't deadlock the ticket forever.
+            var ttlMin = resolveLockTtlMinutes(effectiveConfig);
+            if (isSmLockLabel(skipLabel) && isLockStale(ticket, ttlMin)) {
+                releaseStaleLock(key, skipLabel, ttlMin);
+                skippedKeys.push(key); // lock cleared — re-picked next cycle
+                continue;
+            }
             console.log('  ⏭️  ' + key + ' skipped (label: ' + skipLabel + ')');
             skippedKeys.push(key);
             continue;
@@ -629,5 +707,11 @@ function action(params) {
 }
 
 if (typeof module !== 'undefined' && module.exports) {
-    module.exports = { action: action };
+    module.exports = {
+        action: action,
+        isLockStale: isLockStale,
+        isSmLockLabel: isSmLockLabel,
+        resolveLockTtlMinutes: resolveLockTtlMinutes,
+        parseJiraDateMs: parseJiraDateMs
+    };
 }

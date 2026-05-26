@@ -186,11 +186,16 @@ function postGeneralComment(scm, pullRequestId, commentPath) {
 }
 
 function postInlineComment(scm, pullRequestId, inlineComment) {
-    // Accept both spec formats:
-    //   old spec: { file, comment: "path/to/file.md" }
-    //   agent output: { path, body: "inline text" }
+    // Comment text lives in a .md file referenced by `comment` — the safe, canonical form.
+    // Keeping free-form markdown/code out of pr_review.json means it can never break JSON
+    // parsing (an unescaped regex like /\s/ in an inline `body` string is what deadlocked
+    // the board). `body` (inline text in JSON) is a deprecated fallback kept only so a stray
+    // inline comment is not silently dropped; the output contract no longer documents it.
     const filePath = inlineComment.path || inlineComment.file;
-    const commentText = inlineComment.body || readMarkdownFile(inlineComment.comment);
+    const commentText = readMarkdownFile(inlineComment.comment) || inlineComment.body;
+    if (!inlineComment.comment && inlineComment.body) {
+        console.warn('⚠️ inline comment used deprecated inline `body` (should be a .md file ref): ' + filePath);
+    }
 
     try {
         if (!commentText) {
@@ -301,10 +306,30 @@ function postReviewToJira(ticketKey, reviewContent, reviewData, prUrl) {
  * @returns {Object} Result object
  */
 function action(params) {
+    var ticketKey = (params && params.ticket && params.ticket.key) || null;
+
+    // Resolve config + customParams up front so the finally block can ALWAYS release the SM
+    // idempotency lock and WIP label — even if parsing fails or an exception is thrown.
+    // Coupling lock-release to the happy path is what previously deadlocked the board: a
+    // malformed pr_review.json caused an early return before the lock was ever removed.
+    var config = null;
+    var customParams = {};
     try {
-        const ticketKey = params.ticket.key;
+        config = configLoader.loadProjectConfig(params.jobParams || params);
+        customParams = resolveCustomParams(params, config);
+    } catch (cfgErr) {
+        console.warn('Could not resolve config/customParams early:', cfgErr);
+    }
+    var smLabel = (customParams && customParams.removeLabel) ||
+        (params.jobParams && params.jobParams.customParams && params.jobParams.customParams.removeLabel) ||
+        (params.customParams && params.customParams.removeLabel) ||
+        null;
+    var wipLabel = (params.metadata && params.metadata.contextId)
+        ? params.metadata.contextId + '_wip'
+        : 'pr_review_wip';
+
+    try {
         const jiraReview = params.response || '';
-        var config = configLoader.loadProjectConfig(params.jobParams || params);
         var scm = scmModule.createScm(config);
         var labels = (params.ticket && params.ticket.fields && params.ticket.fields.labels) ? params.ticket.fields.labels : [];
 
@@ -313,7 +338,16 @@ function action(params) {
         // Step 1: Read structured review data
         const reviewData = readReviewJson();
         if (!reviewData) {
-            console.error('Failed to read pr_review.json');
+            console.error('Failed to read pr_review.json — lock will be released in finally so SM re-queues the review');
+            try {
+                jira_post_comment({
+                    key: ticketKey,
+                    comment: 'h3. ⚠️ PR Review output unreadable\n\n' +
+                        'The structured review output ({{outputs/pr_review.json}}) was missing or malformed, ' +
+                        'so the review result could not be applied. The ticket lock has been released and SM ' +
+                        'will re-queue the review on its next cycle.'
+                });
+            } catch (e) { /* best-effort notice */ }
             return {
                 success: false,
                 error: 'No review data found in pr_review.json'
@@ -323,8 +357,7 @@ function action(params) {
         console.log('Review recommendation:', reviewData.recommendation);
         console.log('Issue counts:', JSON.stringify(reviewData.issueCounts));
 
-        // Resolve statuses and customParams
-        const customParams = resolveCustomParams(params, config);
+        // customParams already resolved above (hoisted for the finally block)
         const statuses = resolveStatuses(customParams);
 
         // Step 2: Extract PR info from input folder or find PR using MCP
@@ -489,29 +522,8 @@ function action(params) {
             console.warn('Failed to add ai_pr_reviewed label:', error);
         }
 
-        // Step 9: Remove WIP label if present
-        const wipLabel = params.metadata && params.metadata.contextId
-            ? params.metadata.contextId + '_wip'
-            : 'pr_review_wip';
-
-        try {
-            jira_remove_label({
-                key: ticketKey,
-                label: wipLabel
-            });
-            console.log('Removed WIP label:', wipLabel);
-        } catch (error) {
-            console.warn('Failed to remove WIP label:', error);
-        }
-
-        // Step 10: Remove SM idempotency label (via customParams)
-        const removeLabel = customParams && customParams.removeLabel;
-        if (removeLabel) {
-            try {
-                jira_remove_label({ key: ticketKey, label: removeLabel });
-                console.log('✅ Removed SM label:', removeLabel);
-            } catch (e) {}
-        }
+        // Steps 9 & 10 (remove WIP label + SM idempotency lock) now run unconditionally
+        // in the finally block at the end of action() — see below.
 
         // Step 11: Assign back to initiator
         try {
@@ -668,6 +680,23 @@ function action(params) {
             success: false,
             error: error.toString()
         };
+    } finally {
+        // ALWAYS release the WIP label and SM idempotency lock, regardless of outcome
+        // (success, parse-failure early return, or thrown exception). This guarantees the
+        // ticket is never left permanently locked — a stuck lock makes SM skip the ticket
+        // every cycle and deadlocks the whole board.
+        if (ticketKey) {
+            try {
+                jira_remove_label({ key: ticketKey, label: wipLabel });
+                console.log('Removed WIP label:', wipLabel);
+            } catch (e) { /* best-effort */ }
+            if (smLabel) {
+                try {
+                    jira_remove_label({ key: ticketKey, label: smLabel });
+                    console.log('✅ Released SM lock:', smLabel);
+                } catch (e) { /* best-effort */ }
+            }
+        }
     }
 }
 
