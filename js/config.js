@@ -67,8 +67,8 @@ const LABELS = {
 
 // Git Configuration
 const GIT_CONFIG = {
-    AUTHOR_NAME: 'AI Teammate',
-    AUTHOR_EMAIL: 'agent.ai.native@gmail.com',
+    AUTHOR_NAME: 'Julius AI Teammate',
+    AUTHOR_EMAIL: 'aviel.shnaider@tutanota.com',
     DEFAULT_BASE_BRANCH: 'main',
     DEFAULT_ISSUE_TYPE_PREFIX: 'feature'
 };

@@ -91,8 +91,8 @@ module.exports = {
 
   git: {
     baseBranch: 'main',
-    authorName: 'AI Teammate',
-    authorEmail: 'agent.ai.native@gmail.com'
+    authorName: 'Julius AI Teammate',
+    authorEmail: 'aviel.shnaider@tutanota.com'
   },
 
   scm: {

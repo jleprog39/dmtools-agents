@@ -198,8 +198,8 @@ module.exports = {
   // ── Git ─────────────────────────────────────────────────────────────────
   git: {
     baseBranch: 'main',
-    authorName: 'AI Teammate',
-    authorEmail: 'agent@example.com',
+    authorName: 'Julius AI Teammate',
+    authorEmail: 'aviel.shnaider@tutanota.com',
     branchPrefix: {
       development: 'ai',
       test: 'test',

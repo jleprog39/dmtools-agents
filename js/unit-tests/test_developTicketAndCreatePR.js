@@ -38,7 +38,7 @@ suite('developTicketAndCreatePR > failure recovery', function() {
             cli_execute_command: function(args) {
                 commands.push(args.command);
                 if (args.command.indexOf('gh pr list --head ai/TS-1') === 0) return '';
-                if (args.command === 'git config user.name "AI Teammate"') throw new Error('git config failed');
+                if (args.command === 'git config user.name "Julius AI Teammate"') throw new Error('git config failed');
                 return '';
             },
             jira_post_comment: function(args) { comments.push(args); },

@@ -84,8 +84,8 @@ Centralized configuration for all agent scripts. Contains:
 - `LABELS.NEEDS_CORE_IMPLEMENTATION`: 'needs_core_implementation'
 
 ### Git Configuration
-- `GIT_CONFIG.AUTHOR_NAME`: 'AI Teammate'
-- `GIT_CONFIG.AUTHOR_EMAIL`: 'agent.ai.native@gmail.com'
+- `GIT_CONFIG.AUTHOR_NAME`: 'Julius AI Teammate'
+- `GIT_CONFIG.AUTHOR_EMAIL`: 'aviel.shnaider@tutanota.com'
 - `GIT_CONFIG.DEFAULT_BASE_BRANCH`: 'main'
 - `GIT_CONFIG.DEFAULT_ISSUE_TYPE_PREFIX`: 'feature'
 
