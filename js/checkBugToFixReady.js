@@ -3,16 +3,21 @@
  *
  * Runs on every SM cycle for each Test Case in "Bug To Fix" status.
  * - Finds all linked Bugs.
- * - If all linked Bugs are in "Done" → moves TC to "Backlog" (ready for re-automation).
+ * - If all linked Bugs are in "Done" → moves TC back to the re-automation entry status
+ *   (BACKLOG, configurable; falls back to TODO for workflows with no Backlog status).
+ *   The transition is verified (jira_move_to_status can silently no-op on a missing
+ *   target status), so a stuck workflow fails loud instead of looping silently.
  * - Otherwise → removes the SM idempotency label so the check re-runs next cycle.
  */
 
-const { STATUSES } = require('./config.js');
+const { resolveStatuses } = require('./config.js');
+const { moveToStatusVerified } = require('./common/jiraHelpers.js');
 
 function action(params) {
     const ticketKey = params.ticket && params.ticket.key;
     const customParams = params.jobParams && params.jobParams.customParams;
     const removeLabel = customParams && customParams.removeLabel;
+    const statuses = resolveStatuses(customParams);
 
     function releaseLock() {
         if (ticketKey && removeLabel) {
@@ -59,13 +64,32 @@ function action(params) {
             return { success: true, action: 'waiting', total: totalBugs, notDone: notDoneCount, ticketKey };
         }
 
-        // All linked Bugs are Done → move TC back to Backlog
-        console.log('All', totalBugs, 'linked Bug(s) are Done — moving', ticketKey, 'to Backlog');
+        // All linked Bugs are Done → move TC back to the re-automation entry status.
+        // Primary target is BACKLOG (configurable via customStatuses); fall back to
+        // TODO for workflows that have no "Backlog" status (e.g. Simplified schemes) —
+        // SM rule #19 scans Backlog / To Do / Ready For Development, so either re-enters
+        // the automation pipeline. moveToStatusVerified re-reads the status, so a silent
+        // no-op transition no longer strands the TC while reporting success.
+        const reentryStatus = statuses.BACKLOG;
+        console.log('All', totalBugs, 'linked Bug(s) are Done — moving', ticketKey, 'to', reentryStatus);
 
-        jira_move_to_status({
-            key: ticketKey,
-            statusName: 'Backlog'
-        });
+        const moveResult = moveToStatusVerified(
+            ticketKey,
+            reentryStatus,
+            statuses.TODO,
+            'all linked Bugs are Done → ready for re-automation'
+        );
+
+        if (!moveResult.moved) {
+            // Transition genuinely unavailable in this workflow. The helper already posted
+            // a loud alert; park the TC under the SM lock so we don't re-alert every cycle.
+            // The stale-lock watchdog will retry after the TTL.
+            console.error('❌', ticketKey, 'could not leave "Bug To Fix" — parking until workflow is fixed');
+            try {
+                jira_add_label({ key: ticketKey, label: 'sm_bug_to_fix_check_triggered' });
+            } catch (e) { /* best-effort park */ }
+            return { success: false, action: 'move_failed', status: moveResult.status, ticketKey };
+        }
 
         // Remove test automation label so SM can re-trigger automation
         try {
@@ -81,11 +105,11 @@ function action(params) {
             key: ticketKey,
             comment: 'h3. 🔄 Test Case Ready for Re-automation\n\n' +
                 'All *' + totalBugs + '* linked Bug(s) are now in *Done* status.\n\n' +
-                'This Test Case has been automatically moved back to *Backlog* to be re-automated against the fixed code.'
+                'This Test Case has been automatically moved back to *' + moveResult.via + '* to be re-automated against the fixed code.'
         });
 
-        console.log('✅ TC', ticketKey, 'moved to Backlog');
-        return { success: true, action: 'moved_to_backlog', totalBugs: totalBugs, ticketKey };
+        console.log('✅ TC', ticketKey, 'moved to', moveResult.via);
+        return { success: true, action: 'moved_to_backlog', movedTo: moveResult.via, totalBugs: totalBugs, ticketKey };
 
     } catch (error) {
         console.error('❌ Error in checkBugToFixReady:', error);

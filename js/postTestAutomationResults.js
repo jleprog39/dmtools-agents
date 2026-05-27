@@ -13,7 +13,8 @@
 var configLoader = require('./configLoader.js');
 var prHelper = require('./common/pullRequest.js');
 var autoStart = require('./common/autoStart.js');
-const { GIT_CONFIG, STATUSES, LABELS } = require('./config.js');
+const { GIT_CONFIG, STATUSES, LABELS, resolveStatuses } = require('./config.js');
+const { moveToStatusVerified } = require('./common/jiraHelpers.js');
 
 function cleanCommandOutput(output) {
     return prHelper.cleanCommandOutput(output);
@@ -214,6 +215,7 @@ function action(params) {
         const projectKey = ticketKey.split('-')[0];
         var config = configLoader.loadProjectConfig(params.jobParams || params);
         var customParams = (params.jobParams || params).customParams || {};
+        var statuses = resolveStatuses(customParams);
         var workingDir = config.workingDir || null;
         var testFilesPath = customParams.testFilesGlob || 'testing/';
         const jiraComment = readJiraComment(params, workingDir);
@@ -252,12 +254,7 @@ function action(params) {
             commentMsg += 'Ticket moved back to *Backlog* so SM can retry.';
 
             jira_post_comment({ key: ticketKey, comment: commentMsg });
-            try {
-                jira_move_to_status({ key: ticketKey, statusName: STATUSES.BACKLOG });
-                console.log('✅ Missing result — moved', ticketKey, 'to', STATUSES.BACKLOG);
-            } catch (e) {
-                console.warn('Failed to move missing-result ticket to Backlog:', e);
-            }
+            moveToStatusVerified(ticketKey, statuses.BACKLOG, statuses.TODO, 'test automation produced no result — reset for retry');
             try {
                 const smTriggerLabel = params.jobParams && params.jobParams.customParams && params.jobParams.customParams.removeLabel;
                 if (smTriggerLabel) {
@@ -314,9 +311,9 @@ function action(params) {
                     // PR creation failed — branch has code but no PR; post comment and reset to Backlog for retry
                     console.error('PR creation failed — resetting ticket to Backlog for retry');
                     try {
-                        jira_post_comment({ key: ticketKey, comment: 'h3. ⚠️ PR Creation Failed\n\nTest code was pushed to branch {code}' + branchName + '{code} but the Pull Request could not be created.\n\nTicket moved back to *Backlog* — will be re-processed automatically. The next run will detect the existing branch and create the PR.\n\nError: ' + (prResult.error || 'unknown') });
-                        jira_move_to_status({ key: ticketKey, statusName: 'Backlog' });
-                    } catch (e) { console.warn('Could not reset to Backlog:', e); }
+                        jira_post_comment({ key: ticketKey, comment: 'h3. ⚠️ PR Creation Failed\n\nTest code was pushed to branch {code}' + branchName + '{code} but the Pull Request could not be created.\n\nTicket moved back to the automation queue — will be re-processed automatically. The next run will detect the existing branch and create the PR.\n\nError: ' + (prResult.error || 'unknown') });
+                        moveToStatusVerified(ticketKey, statuses.BACKLOG, statuses.TODO, 'PR creation failed — reset for retry');
+                    } catch (e) { console.warn('Could not reset for retry:', e); }
                     try {
                         const smTriggerLabel = params.jobParams && params.jobParams.customParams && params.jobParams.customParams.removeLabel;
                         if (smTriggerLabel) {
@@ -333,9 +330,9 @@ function action(params) {
                 // Git operations failed — reset to Backlog for retry
                 console.warn('Git operations failed:', gitResult.error);
                 try {
-                    jira_post_comment({ key: ticketKey, comment: 'h3. ⚠️ Git Operations Failed\n\nFailed to commit/push test code: ' + gitResult.error + '\n\nTicket moved back to *Backlog* — will be re-processed automatically.' });
-                    jira_move_to_status({ key: ticketKey, statusName: STATUSES.BACKLOG });
-                } catch (e) { console.warn('Could not reset to Backlog:', e); }
+                    jira_post_comment({ key: ticketKey, comment: 'h3. ⚠️ Git Operations Failed\n\nFailed to commit/push test code: ' + gitResult.error + '\n\nTicket moved back to the automation queue — will be re-processed automatically.' });
+                    moveToStatusVerified(ticketKey, statuses.BACKLOG, statuses.TODO, 'git operations failed — reset for retry');
+                } catch (e) { console.warn('Could not reset for retry:', e); }
                 try {
                     jira_remove_label({ key: ticketKey, label: 'sm_test_automation_triggered' });
                 } catch (e) {}

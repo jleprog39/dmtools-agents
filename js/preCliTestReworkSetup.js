@@ -8,6 +8,8 @@ var configLoader = require('./configLoader.js');
 const gh = require('./common/githubHelpers.js');
 const fetchQuestionsToInput = require('./fetchQuestionsToInput.js');
 const fetchLinkedBugsToInput = require('./fetchLinkedBugsToInput.js');
+const { resolveStatuses } = require('./config.js');
+const { moveToStatusVerified } = require('./common/jiraHelpers.js');
 
 function findTestPRForTicket(scm, ticketKey) {
     try {
@@ -65,10 +67,11 @@ function action(params) {
             }
 
             if (!branchExists) {
-                const err = 'No test PR and no remote branch found for ' + testBranchName + '. Moving to Backlog for re-automation.';
+                const err = 'No test PR and no remote branch found for ' + testBranchName + '. Moving back to the automation queue for re-automation.';
+                var statuses = resolveStatuses((params.jobParams || params).customParams || {});
                 try {
                     jira_post_comment({ key: ticketKey, comment: 'h3. ❌ Test Rework Setup Failed\n\n' + err });
-                    jira_move_to_status({ key: ticketKey, statusName: 'Backlog' });
+                    moveToStatusVerified(ticketKey, statuses.BACKLOG, statuses.TODO, 'no test PR/branch — reset for re-automation');
                 } catch (e) {}
                 return { success: false, error: err };
             }
