@@ -244,9 +244,28 @@ function pushManagedSubmodules(options) {
     });
 }
 
+// Drop the cloned dmtools-agents framework gitlink (and any .gitmodules churn) from the
+// index after `git add .`. The ai-teammate workflow clones this submodule into `agents`,
+// so `git add .` stages a stray gitlink bump that blocks PR review on an orphaned gitlink;
+// the agents pointer is bumped only by deliberate ops, never by per-ticket commits.
+//
+// Error suppression is done in JS (try/catch), NOT via a shell `|| true`: DMTools'
+// cli_execute_command rejects shell metacharacters (`||`, `&&`, `|`, `;`, …) and throws
+// "Command contains disallowed shell metacharacters", which would abort the push entirely
+// and strand the ticket. `run` is the caller's command runner (cli_execute_command wrapper).
+function unstageAgentsGitlink(run) {
+    if (typeof run !== 'function') return;
+    try {
+        run('git reset -q -- agents .gitmodules');
+    } catch (e) {
+        // No agents gitlink / .gitmodules staged — nothing to unstage. Non-fatal.
+    }
+}
+
 module.exports = {
     collectManagedSubmodules: collectManagedSubmodules,
     pushManagedSubmodules: pushManagedSubmodules,
+    unstageAgentsGitlink: unstageAgentsGitlink,
     isSafeRelativePath: isSafeRelativePath,
     isSafeSubmoduleFilePath: isSafeSubmoduleFilePath
 };

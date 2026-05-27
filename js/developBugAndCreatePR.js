@@ -21,6 +21,7 @@
 
 var configLoader = require('./configLoader.js');
 var jh = require('./common/jiraHelpers.js');
+var submoduleHelper = require('./common/submodules.js');
 const { STATUSES, LABELS, resolveStatuses } = require('./config.js');
 const developTicket = require('./developTicketAndCreatePR.js');
 
@@ -177,8 +178,12 @@ function action(params) {
         try {
             cli_execute_command({ command: 'git add .' });
             // Keep the cloned agents gitlink out of the index so it neither counts as
-            // "partial work" nor gets committed on the interrupted-retry push below.
-            cli_execute_command({ command: 'git reset -q -- agents .gitmodules || true' });
+            // "partial work" nor gets committed on the interrupted-retry push below
+            // (see submoduleHelper.unstageAgentsGitlink — suppression is in JS, not a
+            // shell `|| true`, which DMTools rejects as a disallowed metacharacter).
+            submoduleHelper.unstageAgentsGitlink(function(command) {
+                return cli_execute_command({ command: command });
+            });
             const rawStatus = cli_execute_command({ command: 'git status --porcelain' }) || '';
             const statusLines = rawStatus.split('\n').filter(function(l) {
                 return l.trim() &&
