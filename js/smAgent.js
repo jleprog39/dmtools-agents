@@ -383,11 +383,16 @@ function runLocalAction(jsPath, ticket, agentParams) {
     if (!scmCode || !scmCode.trim()) throw new Error('Cannot read: agents/js/common/scm.js');
 
     var configLoaderCode = file_read({ path: 'agents/js/configLoader.js' });
+    var jiraHelpersCode = file_read({ path: 'agents/js/common/jiraHelpers.js' });
 
     var script =
         '(function() {\n' +
         '  var _cm = { exports: {} };\n' +
         '  (function(module, exports) {\n' + configCode + '\n  })(_cm, _cm.exports);\n' +
+        '  var _jh = { exports: {} };\n' +
+        (jiraHelpersCode ?
+        '  (function(module, exports, require) {\n' + jiraHelpersCode + '\n  })(_jh, _jh.exports, function(id) { return _cm.exports; });\n' :
+        '') +
         '  var _scm = { exports: {} };\n' +
         '  (function(module, exports, require) {\n' + scmCode + '\n  })(_scm, _scm.exports, function(id) { return _cm.exports; });\n' +
         '  var _cl = { exports: {} };\n' +
@@ -399,6 +404,7 @@ function runLocalAction(jsPath, ticket, agentParams) {
         '    _am, _am.exports,\n' +
         '    function(id) {\n' +
         '      if (id === "./configLoader.js" || id === "./configLoader") return _cl.exports;\n' +
+        '      if (id.indexOf("jiraHelpers") !== -1) return _jh.exports;\n' +
         '      if (id.indexOf("scm.js") !== -1) return _scm.exports;\n' +
         '      return _cm.exports;\n' +
         '    }\n' +

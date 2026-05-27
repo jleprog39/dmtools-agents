@@ -528,6 +528,38 @@ suite('smAgent: localExecution module loading', function() {
         assert.deepEqual(result.processedKeys, ['T-1']);
     });
 
+    test('local post action can require common/jiraHelpers.js (moveToStatusVerified)', function() {
+        var sm = makeSmAgent({
+            fileMap: {
+                'agents/local_jh_test.json': JSON.stringify({
+                    name: 'JSRunner',
+                    params: {
+                        postJSAction: 'agents/js/unit-tests/_fixtures/local_jh_check.js'
+                    }
+                }),
+                'agents/js/unit-tests/_fixtures/local_jh_check.js':
+                    'var jh = require("./common/jiraHelpers.js");\n' +
+                    'function action(params) {\n' +
+                    '  if (!jh || typeof jh.moveToStatusVerified !== "function") throw new Error("moveToStatusVerified missing");\n' +
+                    '  return { success: true, action: "jiraHelpers ok" };\n' +
+                    '}\n' +
+                    'module.exports = { action: action };'
+            },
+            tickets: [{ key: 'T-1', fields: { labels: [] } }],
+            fullTicket: { key: 'T-1', fields: { labels: [], summary: 'Ticket' } }
+        });
+
+        var result = sm.action(baseParams('o', 'r', [
+            makeRule('project = X', {
+                configFile: 'agents/local_jh_test.json',
+                localExecution: true
+            })
+        ]));
+
+        assert.equal(result.processed, 1, 'local action requiring jiraHelpers processed ticket');
+        assert.deepEqual(result.processedKeys, ['T-1']);
+    });
+
 });
 
 // ── skipIfLabel ───────────────────────────────────────────────────────────────
