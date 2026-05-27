@@ -60,6 +60,11 @@ function action(params) {
 
         console.log('=== Bug development post-action for', ticketKey, '===');
 
+        // Clear any stale "needs human" flag from a previous run. This run re-sets it
+        // below only if the bug is still blocked, keeping Mifrat's needs_human
+        // FactoryAlert in sync with the ticket's real state.
+        try { jira_remove_label({ key: ticketKey, label: LABELS.AI_NEEDS_HUMAN }); } catch (e) {}
+
         // ── Path 0: PR already open — skip re-development ───────────────────
         // If a PR already exists for this ticket's branch, the previous run created
         // it but failed to move the ticket to In Review (e.g. was interrupted).
@@ -109,6 +114,10 @@ function action(params) {
             if (blocked.needs) {
                 comment += '*Needs from human*: ' + blocked.needs + '\n';
             }
+
+            // Flag for Mifrat BEFORE the Blocked transition fires, so the status
+            // webhook sees ai_needs_human already present and raises a needs_human alert.
+            try { jira_add_label({ key: ticketKey, label: LABELS.AI_NEEDS_HUMAN }); } catch (e) {}
 
             try { jira_post_comment({ key: ticketKey, comment: comment }); } catch (e) {}
 

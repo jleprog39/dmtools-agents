@@ -62,7 +62,8 @@ const LABELS = {
     NEEDS_CORE_IMPLEMENTATION: 'needs_core_implementation',
     AI_TEST_AUTOMATION: 'ai_test_automation',
     PR_APPROVED: 'pr_approved',             // Added to PR and ticket when AI approves, removed after merge attempt
-    AI_TESTS_GENERATED: 'ai_tests_generated' // Added after TestCasesGenerator runs — guards against re-generation on re-approval
+    AI_TESTS_GENERATED: 'ai_tests_generated', // Added after TestCasesGenerator runs — guards against re-generation on re-approval
+    AI_NEEDS_HUMAN: 'ai_needs_human'          // AI gave up and needs human action (e.g. missing CI secret/env). Mifrat raises a needs_human FactoryAlert off this label.
 };
 
 // Git Configuration
