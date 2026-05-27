@@ -176,6 +176,9 @@ function action(params) {
         let hasGitChanges = false;
         try {
             cli_execute_command({ command: 'git add .' });
+            // Keep the cloned agents gitlink out of the index so it neither counts as
+            // "partial work" nor gets committed on the interrupted-retry push below.
+            cli_execute_command({ command: 'git reset -q -- agents .gitmodules || true' });
             const rawStatus = cli_execute_command({ command: 'git status --porcelain' }) || '';
             const statusLines = rawStatus.split('\n').filter(function(l) {
                 return l.trim() &&
