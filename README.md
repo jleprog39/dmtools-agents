@@ -539,7 +539,7 @@ All scripts are located in `agents/js/`.
 |--------|-------------|
 | `postTestAutomationResults.js` | Parses the CLI agent's test automation output, commits generated test code to a branch, creates a PR, and moves the Test Case to `In Review-Passed` or `In Review-Failed`. |
 | `postBugCreation.js` | Parses the AI decision for a Failed Test Case: `create` (create a new Jira Bug and link it), `link` (link an existing Bug), `none` (no bug needed), or `tests_pass` (mark TC as Passed). |
-| `checkBugToFixReady.js` | Fetches all Bugs linked to a "Bug To Fix" Test Case and checks if every one is in `Done`. If so, transitions the TC back to `Backlog` (falls back to `To Do` for workflows without a Backlog status) for re-automation. The transition is verified — if it can't move (status missing from the Jira workflow), it posts a loud alert and parks the TC instead of looping silently. |
+| `checkBugToFixReady.js` | Fetches all Bugs linked to a "Bug To Fix" Test Case and checks if every one is in `Done`. If so, transitions the TC back to `Backlog` (falls back to `To Do` for workflows without a Backlog status) for re-automation. The transition is verified via JQL — if it can't be confirmed (status missing from the Jira workflow), it posts a one-time alert (`sm_status_move_failed` label) and keeps retrying instead of silently reporting success. |
 | `checkStoryTestsPassed.js` | Checks whether all Test Case tickets linked to a Story in `In Testing` have status `Passed`. If yes, transitions the Story to `Done`. |
 | `checkBugTestsPassed.js` | Same as above but for Bugs. |
 

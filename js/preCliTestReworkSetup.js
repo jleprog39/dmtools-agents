@@ -71,7 +71,7 @@ function action(params) {
                 var statuses = resolveStatuses((params.jobParams || params).customParams || {});
                 try {
                     jira_post_comment({ key: ticketKey, comment: 'h3. ❌ Test Rework Setup Failed\n\n' + err });
-                    moveToStatusVerified(ticketKey, statuses.BACKLOG, statuses.TODO, 'no test PR/branch — reset for re-automation');
+                    moveToStatusVerified(ticketKey, statuses.BACKLOG, statuses.TODO);
                 } catch (e) {}
                 return { success: false, error: err };
             }

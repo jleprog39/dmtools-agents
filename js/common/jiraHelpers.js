@@ -175,40 +175,46 @@ function moveStatusOrAlert(ticketKey, statusName, contextLabel) {
 }
 
 /**
- * Read the current status name of a ticket. Returns null if unavailable.
- * jira_get_ticket may return a JSON string or an object — handle both.
+ * Confirm (via JQL) that a ticket is currently in a given status.
+ *
+ * Uses jira_search_by_jql rather than jira_get_ticket on purpose: DMTools'
+ * BasicJiraClient caches GET-by-key responses, and the SM executor fetches the
+ * ticket before running a postJS action, so a jira_get_ticket right after a move
+ * returns the stale pre-move status within the same run. A status-scoped JQL is a
+ * fresh query that reflects server truth.
  *
  * @param {string} ticketKey
- * @returns {string|null}
+ * @param {string} statusName
+ * @returns {boolean}
  */
-function getCurrentStatus(ticketKey) {
+function isInStatus(ticketKey, statusName) {
     try {
-        var raw = jira_get_ticket(ticketKey);
-        var t = (typeof raw === 'string') ? JSON.parse(raw) : raw;
-        return (t && t.fields && t.fields.status && t.fields.status.name) || null;
+        var hits = jira_search_by_jql({
+            jql: 'key = ' + ticketKey + ' AND status = "' + statusName + '"',
+            maxResults: 1
+        }) || [];
+        return hits.length > 0;
     } catch (e) {
-        return null;
+        return false;
     }
 }
 
 /**
- * Move a ticket to a target status and VERIFY the transition actually happened.
+ * Move a ticket to a target status and VERIFY (via JQL) the transition happened.
  *
  * jira_move_to_status can silently no-op (without throwing) when the target
  * status/transition does not exist in the project's Jira workflow — e.g. a
- * "Simplified" workflow that has no "Backlog" status. A silent no-op strands the
- * ticket and makes the SM rule loop forever while reporting success. This helper
- * re-reads the status after the move; if it did not take and a fallbackStatus is
- * given, it retries with the fallback. On total failure it posts a loud Jira
- * comment (once-style — caller should park the ticket) and returns moved:false.
+ * "Simplified" workflow that has no "Backlog" status. A silent no-op would strand
+ * the ticket and make the SM rule loop forever while reporting success. This helper
+ * verifies the move and, if it did not take, retries with fallbackStatus. It posts
+ * no comments — the caller decides how to react to moved:false.
  *
  * @param {string} ticketKey
- * @param {string} targetStatus   - preferred status name (transition name in this Jira)
- * @param {string} [fallbackStatus] - tried if targetStatus does not exist in the workflow
- * @param {string} [contextLabel]  - human context for the failure comment
- * @returns {{ moved: boolean, status: (string|null), via: (string|null) }}
+ * @param {string} targetStatus     - preferred status name (transition name in this Jira)
+ * @param {string} [fallbackStatus] - tried if targetStatus is absent from the workflow
+ * @returns {{ moved: boolean, via: (string|null) }}
  */
-function moveToStatusVerified(ticketKey, targetStatus, fallbackStatus, contextLabel) {
+function moveToStatusVerified(ticketKey, targetStatus, fallbackStatus) {
     var candidates = [targetStatus];
     if (fallbackStatus && fallbackStatus !== targetStatus) candidates.push(fallbackStatus);
 
@@ -217,34 +223,19 @@ function moveToStatusVerified(ticketKey, targetStatus, fallbackStatus, contextLa
         try {
             jira_move_to_status({ key: ticketKey, statusName: target });
         } catch (e) {
-            console.warn('  move ' + ticketKey + ' → ' + target + ' threw: ' + ((e && e.message) || e));
+            console.warn('  move ' + ticketKey + ' -> ' + target + ' threw: ' + ((e && e.message) || e));
         }
 
-        var now = getCurrentStatus(ticketKey);
-        if (now && now.toLowerCase() === target.toLowerCase()) {
-            console.log('✅ Moved ' + ticketKey + ' to ' + target + (i > 0 ? ' (fallback)' : ''));
-            return { moved: true, status: now, via: target };
+        if (isInStatus(ticketKey, target)) {
+            console.log('Moved ' + ticketKey + ' to ' + target + (i > 0 ? ' (fallback)' : ''));
+            return { moved: true, via: target };
         }
 
-        console.warn('  ⚠️  ' + ticketKey + ' did not reach "' + target + '" (still "' + (now || 'unknown') + '")' +
-            (i + 1 < candidates.length ? ' — trying fallback "' + candidates[i + 1] + '"' : ''));
+        console.warn('  ' + ticketKey + ' not confirmed in "' + target + '"' +
+            (i + 1 < candidates.length ? ' - trying fallback "' + candidates[i + 1] + '"' : ''));
     }
 
-    var finalStatus = getCurrentStatus(ticketKey);
-    try {
-        jira_post_comment({
-            key: ticketKey,
-            comment: 'h3. ⚠️ Status Transition Failed\n\n' +
-                'Could not move this ticket to *' + targetStatus + '*' +
-                (fallbackStatus ? ' (or fallback *' + fallbackStatus + '*)' : '') +
-                (contextLabel ? ' — ' + contextLabel : '') + '.\n\n' +
-                'The target status/transition does not exist in this project\'s Jira workflow. ' +
-                'Current status: *' + (finalStatus || 'unknown') + '*.\n\n' +
-                'Add the transition (or move the ticket manually) so the SM pipeline can continue.'
-        });
-    } catch (e) { /* best-effort alert */ }
-
-    return { moved: false, status: finalStatus, via: null };
+    return { moved: false, via: null };
 }
 
 // Export functions for use by other modules
@@ -254,7 +245,7 @@ module.exports = {
     setTicketPriority,
     releaseSmLock,
     moveStatusOrAlert,
-    getCurrentStatus,
+    isInStatus,
     moveToStatusVerified
 };
 

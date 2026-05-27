@@ -68,28 +68,39 @@ function action(params) {
         // Primary target is BACKLOG (configurable via customStatuses); fall back to
         // TODO for workflows that have no "Backlog" status (e.g. Simplified schemes) —
         // SM rule #19 scans Backlog / To Do / Ready For Development, so either re-enters
-        // the automation pipeline. moveToStatusVerified re-reads the status, so a silent
-        // no-op transition no longer strands the TC while reporting success.
+        // the automation pipeline. moveToStatusVerified confirms the move via JQL, so a
+        // silent no-op transition no longer strands the TC while reporting success.
         const reentryStatus = statuses.BACKLOG;
         console.log('All', totalBugs, 'linked Bug(s) are Done — moving', ticketKey, 'to', reentryStatus);
 
-        const moveResult = moveToStatusVerified(
-            ticketKey,
-            reentryStatus,
-            statuses.TODO,
-            'all linked Bugs are Done → ready for re-automation'
-        );
+        const moveResult = moveToStatusVerified(ticketKey, reentryStatus, statuses.TODO);
 
         if (!moveResult.moved) {
-            // Transition genuinely unavailable in this workflow. The helper already posted
-            // a loud alert; park the TC under the SM lock so we don't re-alert every cycle.
-            // The stale-lock watchdog will retry after the TTL.
-            console.error('❌', ticketKey, 'could not leave "Bug To Fix" — parking until workflow is fixed');
-            try {
-                jira_add_label({ key: ticketKey, label: 'sm_bug_to_fix_check_triggered' });
-            } catch (e) { /* best-effort park */ }
-            return { success: false, action: 'move_failed', status: moveResult.status, ticketKey };
+            // Could not confirm the transition. Don't claim success and don't spam:
+            // alert at most once (idempotent via label), then release the lock so the
+            // next SM cycle re-checks. If the move actually did land (e.g. brief search
+            // index lag), the TC has already left "Bug To Fix" and won't be re-processed
+            // by this rule; if it is genuinely stuck, it stays visible in "Bug To Fix".
+            const ticketLabels = (params.ticket && params.ticket.fields && params.ticket.fields.labels) || [];
+            if (ticketLabels.indexOf('sm_status_move_failed') === -1) {
+                try {
+                    jira_post_comment({
+                        key: ticketKey,
+                        comment: 'h3. ⚠️ Re-automation transition could not be confirmed\n\n' +
+                            'All linked Bugs are Done, but moving this Test Case to *' + reentryStatus +
+                            '* (or fallback *' + statuses.TODO + '*) could not be confirmed — the status may be ' +
+                            'missing from this project\'s Jira workflow.\n\n' +
+                            'SM will keep retrying; if it stays in *Bug To Fix*, add the transition or move it manually.'
+                    });
+                    jira_add_label({ key: ticketKey, label: 'sm_status_move_failed' });
+                } catch (e) { /* best-effort alert */ }
+            }
+            releaseLock();
+            return { success: false, action: 'move_unverified', ticketKey };
         }
+
+        // Move confirmed — clear a stale move-failed marker from any earlier cycle.
+        try { jira_remove_label({ key: ticketKey, label: 'sm_status_move_failed' }); } catch (e) {}
 
         // Remove test automation label so SM can re-trigger automation
         try {
