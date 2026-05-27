@@ -229,6 +229,14 @@ function performGitOperations(branchName, commitMessage, baseBranch, config, cus
         runCmd({
             command: 'git add .'
         });
+        // The ai-teammate workflow clones dmtools-agents into the `agents` submodule
+        // path, so `git add .` would otherwise stage a stray gitlink bump (and prior
+        // reworks have mangled .gitmodules) — producing an orphaned gitlink that blocks
+        // PR review on every ticket. The agents pointer is bumped only by deliberate
+        // ops, never by per-ticket commits, so keep both out of the index here.
+        runCmd({
+            command: 'git reset -q -- agents .gitmodules || true'
+        });
 
         // Check if there are changes to commit
         const statusOutput = prHelper.readStagedDiffStat(function(command) {

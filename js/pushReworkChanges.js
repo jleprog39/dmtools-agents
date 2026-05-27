@@ -177,6 +177,11 @@ function commitAndPush(ticketKey, config, customParams) {
     });
 
     cmd('git add .');
+    // Keep the dmtools-agents framework submodule out of per-ticket commits: the
+    // ai-teammate workflow clones it into `agents`, so `git add .` would stage a stray
+    // gitlink bump (and earlier reworks mangled .gitmodules), blocking PR review on an
+    // orphaned gitlink. The agents pointer is bumped only by deliberate ops.
+    cmd('git reset -q -- agents .gitmodules || true');
 
     const status = prHelper.readStagedDiffStat(cmd, workingDir);
 
